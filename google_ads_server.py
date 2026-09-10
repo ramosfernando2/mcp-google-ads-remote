@@ -257,8 +257,45 @@ def get_headers(creds):
     
     if GOOGLE_ADS_LOGIN_CUSTOMER_ID:
         headers['login-customer-id'] = format_customer_id(GOOGLE_ADS_LOGIN_CUSTOMER_ID)
-    
+
     return headers
+
+
+def _is_login_customer_id_permission_error(response) -> bool:
+    """True if the API rejected the request because the configured manager
+    account (login-customer-id) doesn't actually manage this customer —
+    happens for standalone accounts not under that manager."""
+    if response.status_code != 403:
+        return False
+    try:
+        body = response.json()
+    except Exception:
+        return False
+    errors = body.get("error", {}).get("details", [{}])[0].get("errors", [])
+    return any(
+        e.get("errorCode", {}).get("authorizationError") == "USER_PERMISSION_DENIED"
+        and "login-customer-id" in e.get("message", "")
+        for e in errors
+    )
+
+
+def post_with_fallback(url, headers, payload):
+    """POST with the configured login-customer-id header; if that manager
+    doesn't manage this account, retry once without the header (standalone account)."""
+    response = requests.post(url, headers=headers, json=payload)
+    if "login-customer-id" in headers and _is_login_customer_id_permission_error(response):
+        fallback_headers = {k: v for k, v in headers.items() if k != "login-customer-id"}
+        response = requests.post(url, headers=fallback_headers, json=payload)
+    return response
+
+
+def get_with_fallback(url, headers):
+    """GET counterpart to post_with_fallback."""
+    response = requests.get(url, headers=headers)
+    if "login-customer-id" in headers and _is_login_customer_id_permission_error(response):
+        fallback_headers = {k: v for k, v in headers.items() if k != "login-customer-id"}
+        response = requests.get(url, headers=fallback_headers)
+    return response
 
 @mcp.tool()
 async def list_accounts() -> str:
@@ -276,7 +313,7 @@ async def list_accounts() -> str:
         headers = get_headers(creds)
         
         url = f"https://googleads.googleapis.com/{API_VERSION}/customers:listAccessibleCustomers"
-        response = requests.get(url, headers=headers)
+        response = get_with_fallback(url, headers)
         
         if response.status_code != 200:
             return f"Error accessing accounts: {response.text}"
@@ -328,7 +365,7 @@ async def execute_gaql_query(
         url = f"https://googleads.googleapis.com/{API_VERSION}/customers/{formatted_customer_id}/googleAds:search"
         
         payload = {"query": query}
-        response = requests.post(url, headers=headers, json=payload)
+        response = post_with_fallback(url, headers, payload)
         
         if response.status_code != 200:
             return f"Error executing query: {response.text}"
@@ -533,7 +570,7 @@ async def run_gaql(
         url = f"https://googleads.googleapis.com/{API_VERSION}/customers/{formatted_customer_id}/googleAds:search"
         
         payload = {"query": query}
-        response = requests.post(url, headers=headers, json=payload)
+        response = post_with_fallback(url, headers, payload)
         
         if response.status_code != 200:
             return f"Error executing query: {response.text}"
@@ -670,7 +707,7 @@ async def get_ad_creatives(
         url = f"https://googleads.googleapis.com/{API_VERSION}/customers/{formatted_customer_id}/googleAds:search"
         
         payload = {"query": query}
-        response = requests.post(url, headers=headers, json=payload)
+        response = post_with_fallback(url, headers, payload)
         
         if response.status_code != 200:
             return f"Error retrieving ad creatives: {response.text}"
@@ -765,7 +802,7 @@ async def get_account_currency(
         url = f"https://googleads.googleapis.com/{API_VERSION}/customers/{formatted_customer_id}/googleAds:search"
         
         payload = {"query": query}
-        response = requests.post(url, headers=headers, json=payload)
+        response = post_with_fallback(url, headers, payload)
         
         if response.status_code != 200:
             return f"Error retrieving account currency: {response.text}"
@@ -986,7 +1023,7 @@ async def get_image_assets(
         url = f"https://googleads.googleapis.com/{API_VERSION}/customers/{formatted_customer_id}/googleAds:search"
         
         payload = {"query": query}
-        response = requests.post(url, headers=headers, json=payload)
+        response = post_with_fallback(url, headers, payload)
         
         if response.status_code != 200:
             return f"Error retrieving image assets: {response.text}"
@@ -1075,7 +1112,7 @@ async def download_image_asset(
         url = f"https://googleads.googleapis.com/{API_VERSION}/customers/{formatted_customer_id}/googleAds:search"
         
         payload = {"query": query}
-        response = requests.post(url, headers=headers, json=payload)
+        response = post_with_fallback(url, headers, payload)
         
         if response.status_code != 200:
             return f"Error retrieving image asset: {response.text}"
@@ -1221,7 +1258,7 @@ async def get_asset_usage(
         # First get the assets
         url = f"https://googleads.googleapis.com/{API_VERSION}/customers/{formatted_customer_id}/googleAds:search"
         payload = {"query": assets_query}
-        assets_response = requests.post(url, headers=headers, json=payload)
+        assets_response = post_with_fallback(url, headers, payload)
         
         if assets_response.status_code != 200:
             return f"Error retrieving assets: {assets_response.text}"
@@ -1232,7 +1269,7 @@ async def get_asset_usage(
         
         # Now get the associations
         payload = {"query": associations_query}
-        assoc_response = requests.post(url, headers=headers, json=payload)
+        assoc_response = post_with_fallback(url, headers, payload)
         
         if assoc_response.status_code != 200:
             return f"Error retrieving asset associations: {assoc_response.text}"
@@ -1373,7 +1410,7 @@ async def analyze_image_assets(
         url = f"https://googleads.googleapis.com/{API_VERSION}/customers/{formatted_customer_id}/googleAds:search"
         
         payload = {"query": query}
-        response = requests.post(url, headers=headers, json=payload)
+        response = post_with_fallback(url, headers, payload)
         
         if response.status_code != 200:
             return f"Error analyzing image assets: {response.text}"
