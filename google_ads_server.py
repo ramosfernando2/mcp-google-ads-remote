@@ -1526,9 +1526,14 @@ if __name__ == "__main__":
         if not mcp_auth_token:
             raise ValueError("MCP_AUTH_TOKEN environment variable must be set for HTTP transport")
 
+        from mcp.server.transport_security import TransportSecuritySettings
+
         mcp.settings.host = "0.0.0.0"
         mcp.settings.port = int(os.environ.get("PORT", "8000"))
         mcp.settings.streamable_http_path = "/mcp"
+        # Running behind a reverse proxy (EasyPanel) with our own bearer-token auth,
+        # so the SDK's Host-header DNS rebinding check (meant for local-only servers) is redundant.
+        mcp.settings.transport_security = TransportSecuritySettings(enable_dns_rebinding_protection=False)
 
         app = mcp.streamable_http_app()
         app = BearerAuthMiddleware(app, mcp_auth_token)
