@@ -49,23 +49,24 @@ GOOGLE_ADS_DEVELOPER_TOKEN = os.environ.get("GOOGLE_ADS_DEVELOPER_TOKEN")
 GOOGLE_ADS_LOGIN_CUSTOMER_ID = os.environ.get("GOOGLE_ADS_LOGIN_CUSTOMER_ID", "")
 GOOGLE_ADS_AUTH_TYPE = os.environ.get("GOOGLE_ADS_AUTH_TYPE", "oauth")  # oauth or service_account
 
-# If no credentials file exists yet, build one from individual OAuth env vars
-# (refresh token flow avoids needing an interactive browser login on the server)
-if not os.path.exists(GOOGLE_ADS_CREDENTIALS_PATH):
-    _refresh_token = os.environ.get("GOOGLE_ADS_REFRESH_TOKEN")
-    _client_id = os.environ.get("GOOGLE_ADS_CLIENT_ID")
-    _client_secret = os.environ.get("GOOGLE_ADS_CLIENT_SECRET")
-    if _refresh_token and _client_id and _client_secret:
-        os.makedirs(os.path.dirname(GOOGLE_ADS_CREDENTIALS_PATH) or ".", exist_ok=True)
-        with open(GOOGLE_ADS_CREDENTIALS_PATH, "w") as f:
-            json.dump({
-                "refresh_token": _refresh_token,
-                "client_id": _client_id,
-                "client_secret": _client_secret,
-                "token_uri": "https://oauth2.googleapis.com/token",
-                "scopes": SCOPES,
-            }, f)
-        logger.info("Wrote OAuth credentials file from environment variables")
+# Always (re)build the credentials file from these env vars when they're set, rather than
+# only when the file is missing — a restart that reuses the same container's disk (not a
+# fresh image) would otherwise keep serving a stale/expired token forever after a redeploy
+# that only changed the env var, since the old file "already exists".
+_refresh_token = os.environ.get("GOOGLE_ADS_REFRESH_TOKEN")
+_client_id = os.environ.get("GOOGLE_ADS_CLIENT_ID")
+_client_secret = os.environ.get("GOOGLE_ADS_CLIENT_SECRET")
+if _refresh_token and _client_id and _client_secret:
+    os.makedirs(os.path.dirname(GOOGLE_ADS_CREDENTIALS_PATH) or ".", exist_ok=True)
+    with open(GOOGLE_ADS_CREDENTIALS_PATH, "w") as f:
+        json.dump({
+            "refresh_token": _refresh_token,
+            "client_id": _client_id,
+            "client_secret": _client_secret,
+            "token_uri": "https://oauth2.googleapis.com/token",
+            "scopes": SCOPES,
+        }, f)
+    logger.info("Wrote OAuth credentials file from environment variables")
 
 def format_customer_id(customer_id: str) -> str:
     """Format customer ID to ensure it's 10 digits without dashes."""
